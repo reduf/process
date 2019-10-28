@@ -1000,20 +1000,3 @@ def GetProcesses(name, right = _PROCESS_ALL_ACCESS):
 
     _CloseHandle(snapshot)
     return entries
-
-def InjectDll(proc, name, entry = None):
-    """Inject a dll with CreateRemoteThread in the remote process"""
-    kernel32 = _GetModuleHandleA(b'kernel32')
-    if not kernel32:
-        raise Win32Exception()
-    LoadLibraryEx = _GetProcAddress(kernel32, b'LoadLibraryA')
-    if not LoadLibraryEx:
-        raise Win32Exception()
-    size = len(name) + 1
-    path = proc.mmap(size)
-    proc.write(path, name.encode('ascii'), b'\0')
-    thread = proc.spawn_thread(LoadLibraryEx, path)
-    thread.resume()
-    retval = thread.join()
-    proc.unmap(path)
-    return retval
