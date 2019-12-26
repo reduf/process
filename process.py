@@ -397,9 +397,8 @@ class ProcessScanner(object):
         if not self.module:
             raise RuntimeError("Couldn't find default module")
         # Very hacky but that will do it for now
-        self.base = self.module.base + 0x1000
-        size, _ = proc.page_info(self.base)
-        self.buffer, = proc.read(self.base, '%ds' % size)
+        self.base = self.module.base
+        self.buffer, = proc.read(self.base, '%ds' % self.module.size)
 
     def find(self, pattern, offset = 0):
         """Returns address of the pattern if found."""
