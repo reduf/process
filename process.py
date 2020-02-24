@@ -699,39 +699,37 @@ class ProcessDebugger(object):
     def poll(self, timeout = _INFINITE):
         """Poll the next event dispatch it"""
         evt = _DEBUG_EVENT()
-        if not _WaitForDebugEvent(byref(evt), timeout):
-            return
+        while _WaitForDebugEvent(byref(evt), timeout):
+            if evt.dwProcessId != self.proc.id:
+                _ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, _DBG_EXCEPTION_NOT_HANDLED)
+                return
 
-        if evt.dwProcessId != self.proc.id:
-            _ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, _DBG_EXCEPTION_NOT_HANDLED)
-            return
+            continue_status = _DBG_CONTINUE
+            event_code = evt.dwDebugEventCode
+            thread = ProcessThread(evt.dwThreadId, self.proc)
 
-        continue_status = _DBG_CONTINUE
-        event_code = evt.dwDebugEventCode
-        thread = ProcessThread(evt.dwThreadId, self.proc)
+            if event_code == _EXCEPTION_DEBUG_EVENT:
+                continue_status = self._on_debug_event(thread, evt.u.Exception)
+            elif event_code == _CREATE_THREAD_DEBUG_EVENT:
+                self.OnCreateThreadDebugEvent(thread, evt.u.CreateThread)
+            elif event_code == _CREATE_PROCESS_DEBUG_EVENT:
+                self.OnCreateProcessDebugEvent(thread, evt.u.CreateProcessInfo)
+            elif event_code == _EXIT_THREAD_DEBUG_EVENT:
+                self.OnExitThreadDebugEvent(thread, evt.u.ExitThread)
+            elif event_code == _EXIT_PROCESS_DEBUG_EVENT:
+                self.exit_code = evt.u.ExitProcess.dwExitCode
+                self.OnExitProcessDebugEvent(thread, evt.u.ExitProcess)
+                self.detach()
+            elif event_code == _LOAD_DLL_DEBUG_EVENT:
+                self.OnLoadDllDebugEvent(thread, evt.u.LoadDll)
+            elif event_code == _UNLOAD_DLL_DEBUG_EVENT:
+                self.OnUnloadDllDebugEvent(thread, evt.u.UnloadDll)
+            elif event_code == _OUTPUT_DEBUG_STRING_EVENT:
+                self.OnOutputDebugStringEvent(thread, evt.u.DebugString)
+            elif event_code == _RIP_EVENT:
+                self.OnRipEvent(evt.u.RipInfo)
 
-        if event_code == _EXCEPTION_DEBUG_EVENT:
-            continue_status = self._on_debug_event(thread, evt.u.Exception)
-        elif event_code == _CREATE_THREAD_DEBUG_EVENT:
-            self.OnCreateThreadDebugEvent(thread, evt.u.CreateThread)
-        elif event_code == _CREATE_PROCESS_DEBUG_EVENT:
-            self.OnCreateProcessDebugEvent(thread, evt.u.CreateProcessInfo)
-        elif event_code == _EXIT_THREAD_DEBUG_EVENT:
-            self.OnExitThreadDebugEvent(thread, evt.u.ExitThread)
-        elif event_code == _EXIT_PROCESS_DEBUG_EVENT:
-            self.exit_code = evt.u.ExitProcess.dwExitCode
-            self.OnExitProcessDebugEvent(thread, evt.u.ExitProcess)
-            self.detach()
-        elif event_code == _LOAD_DLL_DEBUG_EVENT:
-            self.OnLoadDllDebugEvent(thread, evt.u.LoadDll)
-        elif event_code == _UNLOAD_DLL_DEBUG_EVENT:
-            self.OnUnloadDllDebugEvent(thread, evt.u.UnloadDll)
-        elif event_code == _OUTPUT_DEBUG_STRING_EVENT:
-            self.OnOutputDebugStringEvent(thread, evt.u.DebugString)
-        elif event_code == _RIP_EVENT:
-            self.OnRipEvent(evt.u.RipInfo)
-
-        _ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, continue_status)
+            _ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, continue_status)
 
     def _on_single_step(self, thread, addr):
         hook = self.ss_hook
