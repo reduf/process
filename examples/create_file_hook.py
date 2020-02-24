@@ -4,9 +4,10 @@ import signal
 import sys
 import time
 
+import process
 from process import *
 
-_PROCESS_IS_64_BITS = sys.maxsize > 2 ** 32
+_PYTHON_IS_64_BITS = sys.maxsize > 2 ** 32
 
 _GENERIC_EXECUTE    = 0x20000000
 _GENERIC_WRITE      = 0x40000000
@@ -91,14 +92,15 @@ def OnCreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes
     OnCreateFile(filename, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttribute, hTemplateFile)
 
 def watch_process(proc):
-    kernel32 = ctypes.WinDLL('kernel32.dll')
-    hKernel32 = kernel32.GetModuleHandleA(b'kernel32.dll')
+    GetModuleHandleA = process._GetModuleHandleA
+    GetProcAddress = process._GetProcAddress
+    hKernel32 = GetModuleHandleA(b'kernel32.dll')
     if not hKernel32:
         raise Win32Exception()
-    CreateFileW = kernel32.GetProcAddress(hKernel32, b'CreateFileW')
+    CreateFileW = GetProcAddress(hKernel32, b'CreateFileW')
     if not CreateFileW:
         raise Win32Exception()
-    CreateFileA = kernel32.GetProcAddress(hKernel32, b'CreateFileA')
+    CreateFileA = GetProcAddress(hKernel32, b'CreateFileA')
     if not CreateFileA:
         raise Win32Exception()
 
@@ -123,7 +125,7 @@ def watch_process(proc):
     signal.signal(signal.SIGINT, prev_handler)
 
 if __name__ == '__main__':
-    if _PROCESS_IS_64_BITS:
+    if _PYTHON_IS_64_BITS:
         print('This program only works with 32-bits processes for now.')
         sys.exit(1)
 
@@ -158,7 +160,4 @@ if __name__ == '__main__':
         print("Specified '--pname' or '--pid'")
         sys.exit(1)
 
-    if watch_process(proc):
-        sys.exit(0)
-    else:
-        sys.exit(1)
+    watch_process(proc)

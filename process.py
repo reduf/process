@@ -12,30 +12,37 @@ import ctypes
 import struct
 import functools
 
-CHAR = ctypes.c_char
-BYTE = ctypes.c_byte
-WORD = ctypes.c_ushort
-LONG = ctypes.c_long
-BOOL = ctypes.c_long
-UINT = ctypes.c_uint
-WCHAR = ctypes.c_wchar
-DWORD = ctypes.c_ulong
-ULONG = ctypes.c_ulong
-FLOAT = ctypes.c_float
-LPSTR = ctypes.c_char_p
-LPWSTR = ctypes.c_wchar_p
-PVOID = ctypes.c_void_p
-LPVOID = ctypes.c_void_p
-SIZE_T = ctypes.c_size_t
-ULONG_PTR = SIZE_T
-ULONGLONG = ctypes.c_ulonglong
+BOOL        = ctypes.c_long
+BYTE        = ctypes.c_byte
+CHAR        = ctypes.c_char
+DWORD       = ctypes.c_ulong
+DWORD64     = ctypes.c_ulonglong
+FLOAT       = ctypes.c_float
+LONG        = ctypes.c_long
+LONGLONG    = ctypes.c_longlong
+LPSTR       = ctypes.c_char_p
+LPVOID      = ctypes.c_void_p
+LPWSTR      = ctypes.c_wchar_p
+PVOID       = ctypes.c_void_p
+SIZE_T      = ctypes.c_size_t
+UINT        = ctypes.c_uint
+ULONG       = ctypes.c_ulong
+ULONG_PTR   = SIZE_T
+ULONGLONG   = ctypes.c_ulonglong
+WCHAR       = ctypes.c_wchar
+WORD        = ctypes.c_ushort
 
-HANDLE = ctypes.c_void_p
-HMODULE = HANDLE
-NTSTATUS = LONG
+HANDLE      = ctypes.c_void_p
+HMODULE     = HANDLE
+NTSTATUS    = LONG
 
-# probably a better way
-_PROCESS_IS_64_BITS = sys.maxsize > 2 ** 32
+PBOOL       = POINTER(BOOL)
+PDWORD      = POINTER(DWORD)
+PDWORD64    = POINTER(DWORD64)
+PHANDLE     = POINTER(HANDLE)
+PULONG      = POINTER(ULONG)
+
+_PYTHON_IS_64_BITS = sys.maxsize > 2 ** 32
 
 # standard access rights
 _DELETE                             = 0x00010000
@@ -181,11 +188,20 @@ class _MEMORY_BASIC_INFORMATION64(Structure):
     _pack_   = 8
     _fields_ = [('BaseAddress',ULONGLONG),('AllocationBase',ULONGLONG),('AllocationProtect',DWORD),('__alignment1',DWORD),('RegionSize',ULONGLONG),('State',DWORD),('Protect',DWORD),('Type',DWORD),('__alignment2',DWORD)]
 
-class _FLOATING_SAVE_AREA(Structure):
+class _WOW64_FLOATING_SAVE_AREA(Structure):
     _fields_ = [('ControlWord',DWORD),('StatusWord',DWORD),('TagWord',DWORD),('ErrorOffset',DWORD),('ErrorSelector',DWORD),('DataOffset',DWORD),('DataSelector',DWORD),('RegisterArea',BYTE*80),('Spare0',DWORD)]
 
-class _CONTEXT(Structure):
-    _fields_ = [('ContextFlags',DWORD),('Dr0',DWORD),('Dr1',DWORD),('Dr2',DWORD),('Dr3',DWORD),('Dr6',DWORD),('Dr7',DWORD),('FloatSave',_FLOATING_SAVE_AREA),('SegGs',DWORD),('SegFs',DWORD),('SegEs',DWORD),('SegDs',DWORD),('Edi',DWORD),('Esi',DWORD),('Ebx',DWORD),('Edx',DWORD),('Ecx',DWORD),('Eax',DWORD),('Ebp',DWORD),('Eip',DWORD),('SegCs',DWORD),('EFlags',DWORD),('Esp',DWORD),('SegSs',DWORD),('ExtendedRegisters',BYTE*512)]
+class _WOW64_CONTEXT(Structure):
+    _fields_ = [('ContextFlags',DWORD),('Dr0',DWORD),('Dr1',DWORD),('Dr2',DWORD),('Dr3',DWORD),('Dr6',DWORD),('Dr7',DWORD),('FloatSave',_WOW64_FLOATING_SAVE_AREA),('SegGs',DWORD),('SegFs',DWORD),('SegEs',DWORD),('SegDs',DWORD),('Edi',DWORD),('Esi',DWORD),('Ebx',DWORD),('Edx',DWORD),('Ecx',DWORD),('Eax',DWORD),('Ebp',DWORD),('Eip',DWORD),('SegCs',DWORD),('EFlags',DWORD),('Esp',DWORD),('SegSs',DWORD),('ExtendedRegisters',BYTE*512)]
+
+class _M128A(Structure):
+    _fields_ = [('Low',ULONGLONG),('High',LONGLONG)]
+
+class _FLOATING_SAVE_AREA64(Structure):
+    _fields_ = [('Header',_M128A*2),('Legacy',_M128A*8),('Xmm0',_M128A),('Xmm1',_M128A),('Xmm2',_M128A),('Xmm3',_M128A),('Xmm4',_M128A),('Xm5',_M128A),('Xmm6',_M128A),('Xmm7',_M128A),('Xmm8',_M128A),('Xmm9',_M128A),('Xmm10',_M128A),('Xmm11',_M128A),('Xmm12',_M128A),('Xmm13',_M128A),('Xmm14',_M128A),('Xmm15',_M128A)]
+
+class _CONTEXT64(Structure):
+    _fields_ = [('P1Home',DWORD64),('P2Home',DWORD64),('P3Home',DWORD64),('P4Home',DWORD64),('P5Home',DWORD64),('P6Home',DWORD64),('ContextFlags',DWORD),('MxCsr',DWORD),('SegCs',WORD),('SegDs',WORD),('SegEs',WORD),('SegFs',WORD),('SegGs',WORD),('SegSs',WORD),('EFlags',DWORD),('Dr0',DWORD64),('Dr1',DWORD64),('Dr2',DWORD64),('Dr3',DWORD64),('Dr6',DWORD64),('Dr7',DWORD64),('Rax',DWORD64),('Rcx',DWORD64),('Rdx',DWORD64),('Rbx',DWORD64),('Rsp',DWORD64),('Rbp',DWORD64),('Rsi',DWORD64),('Rdi',DWORD64),('R8',DWORD64),('R9',DWORD64),('R10',DWORD64),('R11',DWORD64),('R12',DWORD64),('R13',DWORD64),('R14',DWORD64),('R15',DWORD64),('Rip',DWORD64),('FltSave',_FLOATING_SAVE_AREA64),('VectorRegister',_M128A*26),('VectorControl',DWORD64),('DebugControl',DWORD64),('LastBranchToRip',DWORD64),('LastBranchFromRip',DWORD64),('LastExceptionToRip',DWORD64),('LastExceptionFromRip',DWORD64)]
 
 class _EXCEPTION_DEBUG_INFO(Structure):
     EXCEPTION_MAXIMUM_PARAMETERS = 15
@@ -227,11 +243,16 @@ class _CLIENT_ID(Structure):
 class _THREAD_BASIC_INFORMATION(Structure):
     _fields_ = [('ExitStatus',DWORD),('TebBaseAddress',LPVOID),('ClientId',_CLIENT_ID),('AffinityMask',ULONG_PTR),('Priority',LONG),('BasePriority',LONG)]
 
+if _PYTHON_IS_64_BITS:
+    _CONTEXT = _CONTEXT64
+else:
+    _CONTEXT = _WOW64_CONTEXT
+
 _CloseHandle                        = _kernel32.CloseHandle
 _CloseHandle.argtypes               = [HANDLE]
 _CloseHandle.restype                = BOOL
 _DuplicateHandle                    = _kernel32.DuplicateHandle
-_DuplicateHandle.argtypes           = [HANDLE, HANDLE, HANDLE, POINTER(HANDLE), DWORD, BOOL, DWORD]
+_DuplicateHandle.argtypes           = [HANDLE, HANDLE, HANDLE, PHANDLE, DWORD, BOOL, DWORD]
 _DuplicateHandle.restype            = BOOL
 _GetLastError                       = _kernel32.GetLastError
 _GetLastError.argtypes              = []
@@ -258,23 +279,29 @@ _SuspendThread                      = _kernel32.SuspendThread
 _SuspendThread.argtypes             = [HANDLE]
 _SuspendThread.restype              = DWORD
 _CreateRemoteThread                 = _kernel32.CreateRemoteThread
-_CreateRemoteThread.argtypes        = [HANDLE, LPVOID, SIZE_T, LPVOID, LPVOID, DWORD, POINTER(DWORD)]
+_CreateRemoteThread.argtypes        = [HANDLE, LPVOID, SIZE_T, LPVOID, LPVOID, DWORD, PDWORD]
 _CreateRemoteThread.restype         = HANDLE
 _TerminateThread                    = _kernel32.TerminateThread
 _TerminateThread.argtypes           = [HANDLE, DWORD]
 _TerminateThread.restype            = BOOL
 _GetExitCodeThread                  = _kernel32.GetExitCodeThread
-_GetExitCodeThread.argtypes         = [HANDLE, POINTER(DWORD)]
+_GetExitCodeThread.argtypes         = [HANDLE, PDWORD]
 _GetExitCodeThread.restype          = BOOL
 _GetExitCodeProcess                 = _kernel32.GetExitCodeProcess
-_GetExitCodeProcess.argtypes        = [HANDLE, POINTER(DWORD)]
+_GetExitCodeProcess.argtypes        = [HANDLE, PDWORD]
 _GetExitCodeProcess.restype         = BOOL
+_IsWow64Process                     = _kernel32.IsWow64Process
+_IsWow64Process.argtypes            = [HANDLE, PBOOL]
+_IsWow64Process.restype             = BOOL
 _GetThreadContext                   = _kernel32.GetThreadContext
 _GetThreadContext.argtypes          = [HANDLE, POINTER(_CONTEXT)]
 _GetThreadContext.restype           = BOOL
 _SetThreadContext                   = _kernel32.SetThreadContext
 _SetThreadContext.argtypes          = [HANDLE, POINTER(_CONTEXT)]
 _SetThreadContext.restype           = BOOL
+_Wow64GetThreadContext              = _kernel32.Wow64GetThreadContext
+_Wow64GetThreadContext.argtypes     = [HANDLE, POINTER(_WOW64_CONTEXT)]
+_Wow64GetThreadContext.restype      = BOOL
 
 _VirtualAllocEx                     = _kernel32.VirtualAllocEx
 _VirtualAllocEx.argtypes            = [HANDLE, LPVOID, SIZE_T, DWORD, DWORD]
@@ -283,7 +310,7 @@ _VirtualFreeEx                      = _kernel32.VirtualFreeEx
 _VirtualFreeEx.argtypes             = [HANDLE, LPVOID, SIZE_T, DWORD]
 _VirtualFreeEx.restype              = BOOL
 _VirtualProtectEx                   = _kernel32.VirtualProtectEx
-_VirtualProtectEx.argtypes          = [HANDLE, LPVOID, SIZE_T, DWORD, POINTER(DWORD)]
+_VirtualProtectEx.argtypes          = [HANDLE, LPVOID, SIZE_T, DWORD, PDWORD]
 _VirtualProtectEx.restype           = BOOL
 _VirtualQueryEx                     = _kernel32.VirtualQueryEx
 _VirtualQueryEx.argtypes            = [HANDLE, LPVOID, LPVOID, SIZE_T]
@@ -355,7 +382,7 @@ _GetModuleHandleW.argtypes          = [LPWSTR]
 _GetModuleHandleW.restype           = HMODULE
 
 _NtQueryInformationThread           = _ntdll.NtQueryInformationThread
-_NtQueryInformationThread.argtypes  = [HANDLE, DWORD, PVOID, ULONG, POINTER(ULONG)]
+_NtQueryInformationThread.argtypes  = [HANDLE, DWORD, PVOID, ULONG, PULONG]
 _NtQueryInformationThread.restype   = NTSTATUS
 
 def _create_buffer(size):
@@ -518,10 +545,9 @@ class ProcessThread(object):
 
     def context(self, flags = _CONTEXT_FULL):
         """Retrieves the context of the ProcessThread."""
-        context = _CONTEXT()
+        context = _WOW64_CONTEXT()
         context.ContextFlags = flags
-        success = _GetThreadContext(self.handle, byref(context))
-        if not success:
+        if not _GetThreadContext(self.handle, byref(context)):
             raise Win32Exception()
         return context
 
@@ -958,7 +984,7 @@ class Process(object):
 
     def page_info(self, addr):
         """Returns (size, access right) about a range of pages in the virtual address space of a process."""
-        if not _PROCESS_IS_64_BITS:
+        if not _PYTHON_IS_64_BITS:
             buffer = _MEMORY_BASIC_INFORMATION()
         else:
             buffer = _MEMORY_BASIC_INFORMATION64()
@@ -972,6 +998,12 @@ class Process(object):
         if not handle:
             raise Win32Exception()
         return ProcessThread(id, self, handle)
+
+    def is32bit(self):
+        wow64 = BOOL()
+        if not _IsWow64Process(self.handle, byref(wow64)):
+            raise Win32Exception()
+        return wow64.value == 1
 
     @classmethod
     def from_name(cls, name):
