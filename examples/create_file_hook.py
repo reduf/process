@@ -33,7 +33,7 @@ def read_LPCWSTR(proc, addr, maxlen):
     return ''.join(chr(c) for c in codepoints)
 
 def read_LPCSTR(proc, addr, maxlen):
-    return proc.read(addr, '%ds' % maxlen)
+    return proc.read(addr, '%ds' % maxlen).strip()
 
 def access_to_str(dwAccess):
     accesses = []
@@ -137,7 +137,7 @@ if __name__ == '__main__':
         metavar='process id',
         help='process id of the target')
     parser.add_argument(
-        '--pname',
+        '--proc',
         type=str,
         metavar='process name',
         help='process name of the target')
@@ -145,10 +145,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     proc = None
-    if args.pname is not None:
-        processes = GetProcesses(args.pname)
+    if args.proc is not None:
+        processes = GetProcesses(args.proc)
         if len(processes) > 1:
-            print(f"Several processes have the name '{args.pname}'")
+            print(f"Several processes have the name '{args.proc}'")
             for proc in processes:
                 print('   - ', proc)
             sys.exit(1)
@@ -157,7 +157,7 @@ if __name__ == '__main__':
         proc = Process(args.pid)
 
     if proc is None:
-        print("Specified '--pname' or '--pid'")
+        print("Specified '--proc' or '--pid'")
         sys.exit(1)
 
     watch_process(proc)
