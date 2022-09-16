@@ -108,27 +108,13 @@ def watch_process(proc):
     print(f'CreateFileW: {CreateFileW:08X}')
     print(f'CreateFileA: {CreateFileA:08X}')
 
-    stop = False
-    def signal_handler(sig, frame):
-        nonlocal stop
-        stop = True
-    
-    prev_handler = signal.signal(signal.SIGINT, signal_handler)
-
-    dbg = ProcessDebugger(proc)
-    dbg.add_hook(CreateFileW, OnCreateFileW)
-    dbg.add_hook(CreateFileA, OnCreateFileA)
-
-    while not stop:
-        dbg.poll(32)
-
-    signal.signal(signal.SIGINT, prev_handler)
+    with ProcessDebugger(proc) as dbg:
+        dbg.add_hook(CreateFileW, OnCreateFileW)
+        dbg.add_hook(CreateFileA, OnCreateFileA)
+        while True:
+            dbg.poll(32)
 
 if __name__ == '__main__':
-    if _PYTHON_IS_64_BITS:
-        print('This program only works with 32-bits processes for now.')
-        sys.exit(1)
-
     parser = argparse.ArgumentParser(
         description = 'Start watching a process for CreateFileA & CreateFileW in 32 bits')
     parser.add_argument(
@@ -160,4 +146,15 @@ if __name__ == '__main__':
         print("Specified '--proc' or '--pid'")
         sys.exit(1)
 
-    watch_process(proc)
+    # This script doesn't work when the remote process isn't the same
+    # architecture has the debugging process. It's due the how we find
+    # the address of `CreateFileW` and `CreateFileA`. We find an address
+    # which may not be correct in the remote process.
+    if _PYTHON_IS_64_BITS == proc.is32bit():
+        print('The debugging process architecture must match the remote process architecture')
+        sys.exit(1)
+
+    try:
+        watch_process(proc)
+    except KeyboardInterrupt:
+        pass

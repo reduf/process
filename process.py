@@ -324,6 +324,9 @@ _SetThreadContext.restype           = BOOL
 _Wow64GetThreadContext              = _kernel32.Wow64GetThreadContext
 _Wow64GetThreadContext.argtypes     = [HANDLE, POINTER(_WOW64_CONTEXT)]
 _Wow64GetThreadContext.restype      = BOOL
+_Wow64SetThreadContext              = _kernel32.Wow64SetThreadContext
+_Wow64SetThreadContext.argtypes     = [HANDLE, POINTER(_WOW64_CONTEXT)]
+_Wow64SetThreadContext.restype      = BOOL
 
 _VirtualAllocEx                     = _kernel32.VirtualAllocEx
 _VirtualAllocEx.argtypes            = [HANDLE, LPVOID, SIZE_T, DWORD, DWORD]
@@ -565,13 +568,30 @@ class ProcessThread(object):
             raise Win32Exception()
         return code.value
 
+    def context32(self, flags = _CONTEXT_FULL):
+        """Retrieves the context of the ProcessThread."""
+        if _PYTHON_IS_64_BITS:
+            context = _WOW64_CONTEXT()
+            context.ContextFlags = flags
+            if not _Wow64GetThreadContext(self.handle, byref(context)):
+                raise Win32Exception()
+            return context
+        else:
+            return self.context(flags)
+
     def context(self, flags = _CONTEXT_FULL):
         """Retrieves the context of the ProcessThread."""
-        context = _WOW64_CONTEXT()
+        context = _CONTEXT()
         context.ContextFlags = flags
         if not _GetThreadContext(self.handle, byref(context)):
             raise Win32Exception()
         return context
+
+    def set_context32(self, context):
+        """Sets the context for the ProcessThread."""
+        success = _Wow64SetThreadContext(self.handle, byref(context))
+        if not success:
+            raise Win32Exception()
 
     def set_context(self, context):
         """Sets the context for the ProcessThread."""
@@ -700,44 +720,40 @@ class ProcessHook(object):
 class ProcessDebugger(object):
     """
     """
-    def __init__(self, proc = None):
-        self.hooks = dict();
-        self.attached = False
+    def __init__(self, proc):
+        self.proc = proc
+        self.is32bit = self.proc.is32bit();
         _DebugSetProcessKillOnExit(False)
-        if not proc is None:
-            self.attach(proc)
 
-    def __del__(self):
-        self.detach()
+    def __enter__(self):
+        self.breakpoints = {};
+        self.single_step_breakpoints = {}
+        if not _DebugActiveProcess(self.proc.id):
+            raise Win32Exception()
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        # First we disable all the hooks which will restore the original
+        # instructions.
+        for breakpoint in self.breakpoints.values():
+            breakpoint.disable()
+        self.breakpoints = {}
+
+        # Before stopping to debug the remote process we need to process all
+        # debug events, because otherwise we might crash the remote process.
+        self.poll(0)
+        _DebugActiveProcessStop(self.proc.id)
 
     def __repr__(self):
         return '<ProcessDebugger for Process %d>' % self.proc.id
 
     def add_hook(self, addr, hook):
-        proc_hook = ProcessHook(self.proc, addr, hook)
-        if addr in self.hooks:
-            old_hook = self.hooks[addr]
-            old_hook.disable()
-            
-        self.hooks[addr] = proc_hook
-        proc_hook.enable()
-
-    def attach(self, proc):
-        if self.attached:
-            raise RuntimeError('ProcessDebugger already attached')
-        self.proc = proc
-        if not _DebugActiveProcess(proc.id):
-            raise Win32Exception()
-        self.attached = True
-
-    def detach(self):
-        if not self.attached:
-            return
-        with suppress(Exception):
-            for hook in self.hooks.values():
-                hook.disable()
-        _DebugActiveProcessStop(self.proc.id)
-        self.attached = False
+        new_bp = ProcessHook(self.proc, addr, hook)
+        if addr in self.breakpoints:
+            old_bp = self.breakpoints[addr]
+            old_bp.disable()
+        self.breakpoints[addr] = new_bp
+        new_bp.enable()
 
     def run(self, **kw):
         frequency = kw.pop('frequency', _INFINITE)
@@ -752,49 +768,38 @@ class ProcessDebugger(object):
                 _ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, _DBG_EXCEPTION_NOT_HANDLED)
                 return
 
+            if evt.dwDebugEventCode == _EXIT_PROCESS_DEBUG_EVENT:
+                # This mostly avoid exceptions when exiting the Python process,
+                # because we can't restore breakpoints in a non-existent process.
+                for breakpoint in self.breakpoints.values():
+                    breakpoint.disable()
+                self.breakpoints = {}
+                _ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, _DBG_CONTINUE)
+
+            if evt.dwDebugEventCode != _EXCEPTION_DEBUG_EVENT:
+                _ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, _DBG_EXCEPTION_NOT_HANDLED)
+                return
+
             continue_status = _DBG_CONTINUE
-            event_code = evt.dwDebugEventCode
-            thread = ProcessThread(evt.dwThreadId, self.proc)
-
-            if event_code == _EXCEPTION_DEBUG_EVENT:
+            try:
+                thread = ProcessThread(evt.dwThreadId, self.proc)
                 continue_status = self._on_debug_event(thread, evt.u.Exception)
-            elif event_code == _CREATE_THREAD_DEBUG_EVENT:
-                self.OnCreateThreadDebugEvent(thread, evt.u.CreateThread)
-            elif event_code == _CREATE_PROCESS_DEBUG_EVENT:
-                self.OnCreateProcessDebugEvent(thread, evt.u.CreateProcessInfo)
-            elif event_code == _EXIT_THREAD_DEBUG_EVENT:
-                self.OnExitThreadDebugEvent(thread, evt.u.ExitThread)
-            elif event_code == _EXIT_PROCESS_DEBUG_EVENT:
-                self.exit_code = evt.u.ExitProcess.dwExitCode
-                self.OnExitProcessDebugEvent(thread, evt.u.ExitProcess)
-                self.detach()
-            elif event_code == _LOAD_DLL_DEBUG_EVENT:
-                self.OnLoadDllDebugEvent(thread, evt.u.LoadDll)
-            elif event_code == _UNLOAD_DLL_DEBUG_EVENT:
-                self.OnUnloadDllDebugEvent(thread, evt.u.UnloadDll)
-            elif event_code == _OUTPUT_DEBUG_STRING_EVENT:
-                self.OnOutputDebugStringEvent(thread, evt.u.DebugString)
-            elif event_code == _RIP_EVENT:
-                self.OnRipEvent(evt.u.RipInfo)
-
-            _ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, continue_status)
+            finally:
+                _ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, continue_status)
 
     def _on_single_step(self, thread, addr):
-        hook = self.ss_hook
-        if not hook:
-            return _DBG_EXCEPTION_NOT_HANDLED
-
-        hook.enable()
+        # The single step is done on a int3 which is a single bytes. This mean
+        # the address of the hook is the previous instruction. Note that the hook
+        # structure may not exist anymore in which case the original instruction
+        # should be restored.
+        breakpoint_addr = self.single_step_breakpoints.pop(thread.id)
+        breakpoint = self.breakpoints.get(breakpoint_addr, None)
+        if breakpoint is not None:
+            breakpoint.enable()
         return _DBG_CONTINUE
 
-    def _on_breakpoint(self, thread, addr):
-        proc_hook = self.hooks.get(addr, None)
-        if not proc_hook:
-            return _DBG_EXCEPTION_NOT_HANDLED
-
-        proc_hook.disable()
-
-        ctx = thread.context()
+    def _on_breakpoint32(self, thread, proc_hook):
+        ctx = thread.context32()
         args = list()
 
         hook = proc_hook.hook
@@ -812,16 +817,67 @@ class ProcessDebugger(object):
         args.extend(stack_args)
 
         # What should we do here ??? (We don't want to crash the remote process)
-        with suppress(Exception):
+        try:
             hook(*args)
-
-        # This will enable a "single-step" breakpoint
-        # We cannot reach an other breakpoint before raising Single-Step exception
-        self.ss_hook = proc_hook
-        ctx.Eip -= 1
-        ctx.EFlags |= 0x100 # TRAP_FLAG
-        thread.set_context(ctx)
+        finally:
+            ctx.Eip -= 1
+            ctx.EFlags |= 0x100 # TRAP_FLAG
+            thread.set_context(ctx)
         return _DBG_CONTINUE
+
+    def _on_breakpoint64(self, thread, breakpoint):
+        ctx = thread.context()
+
+        args = list()
+        hook = breakpoint.hook
+        conv = hook.callconv
+        argc = len(hook.argtypes)
+
+        if 1 <= argc:
+            args.append(ctx.Rcx)
+        if 2 <= argc:
+            args.append(ctx.Rdx)
+        if 3 <= argc:
+            args.append(ctx.R8)
+        if 4 <= argc:
+            args.append(ctx.R9)
+
+        argstr = hook.argstr[len(args):]
+        argc = argc - len(args)
+        stack_args = self.proc.read(ctx.Rsp + 8, argstr)
+        args.extend(stack_args)
+
+        try:
+            hook(*args)
+        finally:
+            ctx.Rip -= 1
+            ctx.EFlags |= 0x100 # TRAP_FLAG
+            thread.set_context(ctx)
+        return _DBG_CONTINUE
+
+    def _on_breakpoint(self, thread, addr):
+        breakpoint = self.breakpoints.get(addr, None)
+        if not breakpoint:
+            return _DBG_EXCEPTION_NOT_HANDLED
+        breakpoint.disable()
+
+        # When single stepping, we don't know whether the next instruction
+        # will jump elsewhere in the code. For this reason, we need to save
+        # the breakpoint to re-enable it after the single step.
+        #
+        # - We save one breakpoint per thread, because we can't have more than
+        #   one concurrent breakpoint on the same thread. This guarantee the
+        #   next debug event is this breakpoint.
+        # - We save only the address, because if the breakpoint get deleted in
+        #   the mean time, we can detect it and not re-enable it.
+        if thread.id in self.single_step_breakpoints:
+            raise RuntimeError("It shouldn't be possible to have two breakpoints to restore on the same thread")
+        self.single_step_breakpoints[thread.id] = addr
+
+        if self.is32bit:
+            return self._on_breakpoint32(thread, breakpoint)
+        else:
+            return self._on_breakpoint64(thread, breakpoint)
 
     def _on_debug_event(self, thread, info):
         """This is internal, but if you were to overload it, return the continuation status"""
@@ -834,42 +890,6 @@ class ProcessDebugger(object):
         if code == _EXCEPTION_BREAKPOINT:
             return self._on_breakpoint(thread, addr)
         return _DBG_EXCEPTION_NOT_HANDLED
-
-    def OnCreateThreadDebugEvent(self, thread, info):
-        """Can be overloaded to hook this event"""
-        pass
-
-    def OnCreateThreadDebugEvent(self, thread, info):
-        """Can be overloaded to hook this event"""
-        pass
-
-    def OnCreateProcessDebugEvent(self, thread, info):
-        """Can be overloaded to hook this event"""
-        pass
-
-    def OnExitThreadDebugEvent(self, thread, info):
-        """Can be overloaded to hook this event"""
-        pass
-
-    def OnExitProcessDebugEvent(self, thread, info):
-        """Can be overloaded to hook this event"""
-        pass
-
-    def OnLoadDllDebugEvent(self, thread, info):
-        """Can be overloaded to hook this event"""
-        pass
-
-    def OnUnloadDllDebugEvent(self, thread, info):
-        """Can be overloaded to hook this event"""
-        pass
-
-    def OnOutputDebugStringEvent(self, thread, info):
-        """Can be overloaded to hook this event"""
-        pass
-
-    def OnRipEvent(self):
-        """Can be overloaded to hook this event"""
-        pass
 
 class Process(object):
     """
