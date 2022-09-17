@@ -40,7 +40,7 @@ Finally, you can test the installation by:
 ...
 ```
 
-## Testing examples without installing
+### Testing examples without installing
 You can simply leverage `PYTHONPATH` environment variable to tell Python where
 to find `process.py`. For instance, on Windows you could do:
 ```
